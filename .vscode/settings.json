@@ -1,0 +1,19 @@
+{
+  "debug.internalConsoleOptions": "openOnSessionStart",
+  "debug.javascript.autoAttachFilter": "onlyWithFlag",
+  "debug.javascript.unmapMissingSources": true,
+  "files.exclude": {
+    "**/.DS_Store": true,
+    "**/node_modules": true,
+    "**/.turbo": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/build": true,
+    "pnpm-lock.yaml": true
+  },
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true
+}
+

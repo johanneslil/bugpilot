@@ -1,0 +1,144 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgvector(map: "vector")]
+}
+
+model User {
+  id         String   @id @default(cuid())
+  email      String   @unique
+  name       String
+  created_at DateTime @default(now())
+  
+  bugs            Bug[]
+  comments        Comment[]
+  // Remove: Users should access messages through sessions, not directly
+  chat_messages   ChatMessage[]
+  // Add: Users own chat sessions, following the same pattern as bugs
+  chat_sessions   ChatSession[]
+}
+
+model Bug {
+  id                String    @id @default(cuid())
+  title             String
+  description       String
+  severity          Severity?
+  area              Area?
+
+  // I wanted to separate AI suggestions from user-confirmed values. 
+  // This gives users control to accept or reject AI recommendations while maintaining an audit trail of what the AI suggested.
+  // To really track AI suggestions and classification accuracy, we would need to add a new model for AI suggestions and link them to bugs.
+  // And then also track whether the user accepted or rejected the suggestions.
+  suggested_severity Severity? 
+  suggested_area    Area?
+  status            BugStatus @default(OPEN)
+  
+  // Note: Unsupported types don't generate TS definitions in Prisma Client.
+  // Use $queryRaw when accessing this field directly for type safety.
+  // This is required for pgvector's native similarity search (<=> operator).
+  embedding         Unsupported("vector(1536)")? // nullable so we can backfill embeddings later if desired
+  
+  created_by_id     String
+  created_by        User      @relation(fields: [created_by_id], references: [id])
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+  
+  comments          Comment[]
+
+  // Indexes for common query patterns.
+  // E.g. get all bugs created in the last 30 days, or get all bugs with severity S1.
+  @@index([created_at])
+  @@index([severity])
+  @@index([area])
+  @@index([status])
+}
+
+model Comment {
+  id         String   @id @default(cuid())
+  content    String
+  
+  bug_id     String
+  // Delete comment when the bug it belongs to is deleted. Comments cannot exist in a vacuum.
+  bug        Bug      @relation(fields: [bug_id], references: [id], onDelete: Cascade)
+  
+  user_id    String
+  user       User     @relation(fields: [user_id], references: [id])
+  
+  created_at DateTime @default(now())
+  
+  // [bug_id] only: Finds comments for a bug quickly, but still needs to sort them in memory by created_at
+  // [bug_id, created_at]: Finds comments for a bug quickly AND they're already sorted in the index structure.
+  // Tradeoff:
+  // The composite index is slightly larger in storage, but eliminates the sorting operation.
+  // Since "comments for a bug, sorted by time" is likely the most common query pattern, it's worth it.
+  @@index([bug_id, created_at])
+}
+
+model ChatSession {
+  id         String   @id @default(cuid())
+  title      String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  user_id     String
+  user        User      @relation(fields: [user_id], references: [id])
+  
+  // Messages belong to sessions. Query pattern: "get all messages for this session"
+  messages   ChatMessage[]
+}
+
+model ChatMessage {
+  id              String      @id @default(cuid())
+  role            MessageRole
+  content         String
+  
+  session_id      String
+  session         ChatSession @relation(fields: [session_id], references: [id], onDelete: Cascade)
+  
+  // Optional: Tracks which user created the message (would be useful for multi-user sessions)
+  // In our case, the user is only needed in the session.
+  created_by_id   String?
+  created_by      User?       @relation(fields: [created_by_id], references: [id])
+  created_at      DateTime    @default(now())
+
+  // if user can edit messages, we could add an updated_at field here
+  
+  // For streaming state management
+  is_complete     Boolean     @default(false)
+  
+  // Indexes for common query patterns.
+  // E.g. get all messages for a session, sorted by time.
+  @@index([session_id, created_at])
+}
+
+enum Severity {
+  S0
+  S1
+  S2
+  S3
+}
+
+enum Area {
+  FRONTEND
+  BACKEND
+  INFRA
+  DATA
+}
+
+enum BugStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
